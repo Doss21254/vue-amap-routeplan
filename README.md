@@ -1,29 +1,18 @@
-# vue
-
-This template should help get you started developing with Vue 3 in Vite.
-
-## Recommended IDE Setup
-
-[VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur) + [TypeScript Vue Plugin (Volar)](https://marketplace.visualstudio.com/items?itemName=Vue.vscode-typescript-vue-plugin).
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vitejs.dev/config/).
-
-## Project Setup
-
-```sh
+# Vue3 高德地图路线规划Demo
+## 技术栈
+Vue3 + Vite + script setup + 高德地图JS API
+## 实现功能
+1. 初始化地图容器，生命周期钩子避免DOM加载报错
+2. 驾车路线规划，自定义起点/终点坐标
+3. 自定义路线线条样式、点位标记图标
+4. onUnmounted会销毁地图实例，防止内存泄漏
+## 本地启动步骤
+1. 克隆仓库
+git clone https://github.com/Doss21254/vue-amap-route.git
+2. 进入项目
+cd vue-amap-route
+3. 安装依赖
 npm install
-```
-
-### Compile and Hot-Reload for Development
-
-```sh
+4. 配置高德key：在地图初始化代码填入自己Web端密钥
+5. 启动项目
 npm run dev
-```
-
-### Compile and Minify for Production
-
-```sh
-npm run build
-```
