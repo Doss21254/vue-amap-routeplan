@@ -1,0 +1,501 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高德地图 Vue 驾车路线规划</title>
+    <!-- 引入 TailwindCSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- 引入 Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- 引入高德地图 Loader -->
+    <script src="https://webapi.amap.com/loader.js"></script>
+    
+    <style>
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        } 
+/*         
+        地图容器高度 */
+        #map-container {
+            height: 100%;
+            width: 100%;
+            border-radius: 0.5rem;
+            z-index: 1;
+        }
+
+        /* 加载动画 */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #3b82f6;
+            width: 24px;
+            height: 24px;
+            -webkit-animation: spin 4s linear infinite; /* Safari */
+            animation: spin 4s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* 路线详情面板过渡 */
+        .fade-enter-active, .fade-leave-active {
+            transition: opacity 0.3s ease;
+        }
+        .fade-enter-from, .fade-leave-to {
+            opacity: 0;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen overflow-hidden font-sans text-gray-800">
+
+
+    <div id="app" class="h-full flex flex-col md:flex-row">
+    
+    <!-- 左侧控制面板 -->
+    <div class="w-full md:w-96 bg-white shadow-xl z-20 flex flex-col h-1/3 md:h-full border-r border-gray-200">
+        <!-- 头部 -->
+        <div class="p-5 border-b border-gray-100 bg-gradient-to-r from-blue-600 to-blue-500 text-white">
+            <h1 class="text-xl font-bold flex items-center gap-2">
+                <i class="fa-solid fa-map-location-dot"></i>
+                驾车路线规划
+            </h1>
+            <p class="text-xs text-blue-100 mt-1 opacity-80">基于高德地图 JS API 2.0 + Vue 3</p>
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="p-5 space-y-4 overflow-y-auto flex-1">
+            <!-- 起点输入 -->
+            <div class="relative group">
+k k                <div class="flex items-center bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent transition-all">
+                    <i class="fa-solid fa-location-dot text-green-500 mr-2"></i>
+                    <input 
+                        v-model="startPoint.input" 
+                        @keyup.enter="geocodeAndPlan('start')"
+                        type="text" 
+                        placeholder="输入地址或点击地图选点" 
+                        class="bg-transparent w-full outline-none text-sm text-gray-700 placeholder-gray-400"
+                    >
+                    <button @click="useCurrentLocation" class="text-gray-400 hover:text-blue-500 transition-colors" title="使用当前位置">
+                        <i class="fa-solid fa-crosshairs"></i>
+                    </button>
+                </div>
+                <div v-if="startPoint.coords" class="text-[10px] text-gray-400 mt-1 font-mono">
+                    {{ startPoint.coords.join(', ') }}
+                </div>
+            </div>
+
+            <!-- 终点输入 -->
+            <div class="relative group">
+                <label class="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wider">终点 (Destination)</label>
+                <div class="flex items-center bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent transition-all">
+                    <i class="fa-solid fa-flag-checkered text-red-500 mr-2"></i>
+                    <input 
+                        v-model="endPoint.input" 
+                        @keyup.enter="geocodeAndPlan('end')"
+                        type="text" 
+                        placeholder="输入地址或点击地图选点" 
+                        class="bg-transparent w-full outline-none text-sm text-gray-700 placeholder-gray-400"
+                    >
+                </div>
+                <div v-if="endPoint.coords" class="text-[10px] text-gray-400 mt-1 font-mono">
+                    {{ endPoint.coords.join(', ') }}
+                </div>
+            </div>
+
+            <!-- 策略选择 -->
+            <div>
+                <label class="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wider">偏好策略</label>
+                <div class="grid grid-cols-3 gap-2">
+                    <button 
+                        v-for="policy in policies" 
+                        :key="policy.value"
+                        @click="selectedPolicy = policy.value"
+                        :class="['px-2 py-2 text-xs rounded-md border transition-all flex flex-col items-center justify-center gap-1', 
+                            selectedPolicy === policy.value 
+                            ? 'bg-blue-50 border-blue-500 text-blue-600 font-medium' 
+                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50']"
+                    >
+                        <i :class="policy.icon"></i>
+                        {{ policy.label }}
+                    </button>
+                </div>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="pt-2">
+                <button 
+                    @click="calculateRoute" 
+                    :disabled="!isReadyToPlan || isLoading"
+                    class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium py-2.5 px-4 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
+                >
+                    <div v-if="isLoading" class="loader border-white border-t-transparent w-4 h-4"></div>
+                    <span v-else><i class="fa-solid fa-route"></i> 开始规划</span>
+                </button>
+                <button 
+                    v-if="routeInfo.distance"
+                    @click="clearRoute" 
+                    class="w-full mt-2 bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 font-medium py-2 px-4 rounded-lg transition-all text-sm"
+                >
+                    清除路线
+                </button>
+            </div>
+
+            <!-- 路线结果摘要 -->
+            <div v-if="routeInfo.distance" class="bg-blue-50 rounded-lg p-4 border border-blue-100 animate-fade-in">
+                <div class="flex justify-between items-end mb-2">
+                    <span class="text-sm text-gray-500">全程距离</span>
+                    <span class="text-lg font-bold text-blue-700">{{ routeInfo.distance }}</span>
+                </div>
+                <div class="flex justify-between items-end mb-2">
+                    <span class="text-sm text-gray-500">预计时间</span>
+                    <span class="text-lg font-bold text-blue-700">{{ routeInfo.duration }}</span>
+                </div>
+                <div class="flex justify-between items-end">
+                    <span class="text-sm text-gray-500">打车费用(估)</span>
+                    <span class="text-base font-semibold text-gray-700">¥{{ routeInfo.cost }}</span>
+                </div>
+            </div>
+
+            <!-- 错误提示 -->
+            <div v-if="errorMessage" class="bg-red-50 text-red-600 text-sm p-3 rounded-lg border border-red-100 flex items-start gap-2">
+                <i class="fa-solid fa-circle-exclamation mt-0.5"></i>
+                <span>{{ errorMessage }}</span>
+            </div>
+            
+            <!-- 操作指引 -->
+            <div class="text-xs text-gray-400 bg-gray-50 p-3 rounded border border-gray-100">
+                <p class="font-semibold mb-1"><i class="fa-regular fa-lightbulb text-yellow-500"></i> 提示：</p>
+                <ul class="list-disc list-inside space-y-1">
+                    <li>可直接在地图上点击选择起点和终点。</li>
+                    <li>首次点击设为起点，二次点击设为终点。</li>
+                    <li>支持输入中文地址自动解析坐标。</li>
+                </ul>
+            </div>
+        </div>
+        
+        <!-- 底部版权 -->
+        <div class="p-3 text-center text-[10px] text-gray-400 border-t border-gray-100 bg-gray-50">
+            Powered by AMap JS API 2.0
+        </div>
+    </div>
+
+    <!-- 右侧地图区域 -->
+    <div class="flex-1 relative bg-gray-200 h-2/3 md:h-full">
+        <!-- 地图容器 -->
+        <div id="map-container"></div>
+        
+        <!-- 地图加载遮罩 -->
+        <div v-if="!mapInitialized" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-100 z-10">
+            <div class="loader w-10 h-10 border-4 border-blue-200 border-t-blue-600 mb-4"></div>
+            <p class="text-gray-500 text-sm">正在初始化地图资源...</p>
+        </div>
+
+        <!-- 悬浮提示：点击地图选点 -->
+        <div v-if="mapInitialized && !routeInfo.distance" class="absolute top-4 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-sm px-4 py-2 rounded-full shadow-lg border border-gray-200 z-10 pointer-events-none">
+            <span class="text-xs font-medium text-gray-600">
+                <i class="fa-solid fa-hand-pointer text-blue-500 mr-1"></i>
+                {{ clickStep === 1 ? '请点击地图设置起点' : '请点击地图设置终点' }}
+            </span>
+        </div>
+    </div>
+</div>
+
+<script>
+    const { createApp, ref, reactive, onMounted, computed } = Vue;
+
+    createApp({
+        setup() {
+            // 状态定义
+            const mapInitialized = ref(false);
+            const isLoading = ref(false);
+            const errorMessage = ref('');
+            const clickStep = ref(1); // 1: 选起点, 2: 选终点
+            
+            // 表单数据
+            const startPoint = reactive({ input: '', coords: null });
+            const endPoint = reactive({ input: '', coords: null });
+            
+            // 路线结果
+            const routeInfo = reactive({ distance: '', duration: '', cost: '' });
+            
+            // 配置
+            const selectedPolicy = ref('LEAST_TIME');
+            const policies = [
+                { label: '最快', value: 'LEAST_TIME', icon: 'fa-solid fa-stopwatch' },
+                { label: '最短', value: 'LEAST_DISTANCE', icon: 'fa-solid fa-ruler-horizontal' },
+                { label: '躲避拥堵', value: 'REAL_TRAFFIC', icon: 'fa-solid fa-traffic-light' }
+            ];
+
+            // 高德实例引用
+            let mapInstance = null;
+            let drivingInstance = null;
+            let geocoderInstance = null;
+            let startMarker = null;
+            let endMarker = null;
+
+            // 计算属性：是否准备好规划
+            const isReadyToPlan = computed(() => {
+                return startPoint.coords && endPoint.coords;
+            });
+
+            // 初始化地图
+            const initMap = async () => {
+                try {
+                    // 【重要】配置安全密钥，实际使用时请替换为你的安全密钥
+                    // 注意：为了演示代码可运行，这里使用占位符。
+                    // 如果你没有密钥，地图可能无法加载或报错 INVALID_USER_SCODE
+                    window._AMapSecurityConfig = {
+                        securityJsCode: '7a23b59da77abd93a0a798a1962c5af2', // 请替换
+                    };
+
+                    await AMapLoader.load({
+                        key: "a89552400d81d0c7b0d139d77026045c", // 请替换为你的高德 Web端 Key
+                        version: "2.0",
+                        plugins: ["AMap.Driving", "AMap.Geocoder", "AMap.ToolBar", "AMap.Scale"]
+                    });
+
+                    // 创建地图
+                    mapInstance = new AMap.Map("map-container", {
+                        zoom: 11,
+                        center: [112.971354,23.302206], // 三水校区中心
+                        viewMode: "2D",
+                        mapStyle: "amap://styles/whitesmoke" // 清新风格
+                    });
+
+                    // 添加控件
+                    mapInstance.addControl(new AMap.ToolBar());
+                    mapInstance.addControl(new AMap.Scale());
+
+                    // 初始化驾车规划插件
+                    drivingInstance = new AMap.Driving({
+                        map: mapInstance,
+                        panel: null, // 不使用默认面板，自定义UI
+                        policy: AMap.DrivingPolicy[selectedPolicy.value],
+                        hideMarkers: true, // 隐藏默认起终点标记，使用自定义Marker
+                        autoFitView: true // 自动调整视野
+                    });
+
+                    // 初始化地理编码插件
+                    geocoderInstance = new AMap.Geocoder();
+
+                    // 绑定地图点击事件
+                    mapInstance.on('click', handleMapClick);
+
+                    mapInitialized.value = true;
+                } catch (error) {
+                    console.error("地图加载失败:", error);
+                    errorMessage.value = "地图加载失败，请检查 Key 和安全密钥配置。";
+                }
+            };
+
+            // 处理地图点击
+            const handleMapClick = (e) => {
+                if (!mapInitialized.value) return;
+                
+                const lng = e.lnglat.getLng();
+                const lat = e.lnglat.getLat();
+                const coords = [lng, lat];
+
+                if (clickStep.value === 1) {
+                    // 设置起点
+                    setPoint('start', coords);
+                    clickStep.value = 2;
+                } else {
+                    // 设置终点
+                    setPoint('end', coords);
+                    clickStep.value = 1; // 重置为选起点模式，方便下次重新选
+                    // 如果起点已存在，自动规划
+                    if (startPoint.coords) {
+                        calculateRoute();
+                    }
+                }
+            };
+
+            // 设置点位辅助函数
+            const setPoint = (type, coords) => {
+                const pointObj = type === 'start' ? startPoint : endPoint;
+                pointObj.coords = coords;
+                
+                // 逆地理编码获取地址名称
+                geocoderInstance.getAddress(coords, (status, result) => {
+                    if (status === 'complete' && result.regeocode) {
+                        pointObj.input = result.regeocode.formattedAddress;
+                    } else {
+                        pointObj.input = `${coords.toFixed(4)}, ${coords.toFixed(4)}`;
+                    }
+                });
+
+                // 更新地图标记
+                updateMarker(type, coords);
+            };
+
+            // 更新地图标记
+            const updateMarker = (type, coords) => {
+                const color = type === 'start' ? '#10B981' : '#EF4444'; // Green : Red
+                const iconContent = `<div style="background-color:${color};width:12px;height:12px;border-radius:50%;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3);"></div>`;
+                
+                if (type === 'start') {
+                    if (startMarker) mapInstance.remove(startMarker);
+                    startMarker = new AMap.Marker({
+                        position: coords,
+                        content: iconContent,
+                        offset: new AMap.Pixel(-6, -6),
+                        zIndex: 100
+                    });
+                    mapInstance.add(startMarker);
+                } else {
+                    if (endMarker) mapInstance.remove(endMarker);
+                    endMarker = new AMap.Marker({
+                        position: coords,
+                        content: iconContent,
+                        offset: new AMap.Pixel(-6, -6),
+                        zIndex: 100
+                    });
+                    mapInstance.add(endMarker);
+                }
+            };
+
+            // 地理编码并规划（用于输入框回车）
+            const geocodeAndPlan = (type) => {
+                const keyword = type === 'start' ? startPoint.input : endPoint.input;
+                if (!keyword) return;
+
+                isLoading.value = true;
+                geocoderInstance.getLocation(keyword, (status, result) => {
+                    isLoading.value = false;
+                    if (status === 'complete' && result.geocodes.length) {
+                        const location = result.geocodes.location;
+                        const coords = [location.lng, location.lat];
+                        setPoint(type, coords);
+                        
+                        // 如果两个点都有了，自动规划
+                        if (startPoint.coords && endPoint.coords) {
+                            calculateRoute();
+                        }
+                    } else {
+                        errorMessage.value = `未找到地址：“${keyword}”`;
+                    }
+                });
+            };
+
+            // 使用当前位置
+            const useCurrentLocation = () => {
+                if (!navigator.geolocation) {
+                    errorMessage.value = "浏览器不支持地理定位";
+                    return;
+                }
+                isLoading.value = true;
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const coords = [position.coords.longitude, position.coords.latitude];
+                        setPoint('start', coords);
+                        isLoading.value = false;
+                        // 尝试自动规划如果终点已有
+                        if (endPoint.coords) calculateRoute();
+                    },
+                    (error) => {
+                        isLoading.value = false;
+                        errorMessage.value = "获取位置失败，请允许定位权限";
+                    }
+                );
+            };
+
+            // 执行路线规划
+            const calculateRoute = () => {
+                if (!startPoint.coords || !endPoint.coords) {
+                    errorMessage.value = "请先设置起点和终点";
+                    return;
+                }
+
+                isLoading.value = true;
+                errorMessage.value = '';
+                
+                // 更新策略
+                drivingInstance.setPolicy(AMap.DrivingPolicy[selectedPolicy.value]);
+
+                drivingInstance.search(
+                    new AMap.LngLat(...startPoint.coords),
+                    new AMap.LngLat(...endPoint.coords),
+                    (status, result) => {
+                        isLoading.value = false;
+                        if (status === 'complete') {
+                            if (result.routes && result.routes.length) {
+                                const route = result.routes;
+                                routeInfo.distance = (route.distance / 1000).toFixed(1) + ' km';
+                                routeInfo.duration = formatDuration(route.time);
+                                // 简单估算打车费：起步价13 + 2.5元/km (仅供参考)
+                                const distKm = route.distance / 1000;
+                                routeInfo.cost = Math.ceil(13 + distKm * 2.5);
+                            } else {
+                                errorMessage.value = "未找到可行路线";
+                            }
+                        } else {
+                            errorMessage.value = "路线规划失败，请稍后重试";
+                            console.error(result);
+                        }
+                    }
+                );
+            };
+
+            // 格式化时间
+            const formatDuration = (seconds) => {
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                if (hours > 0) {
+                    return `${hours}小时 ${minutes}分钟`;
+                }
+                return `${minutes}分钟`;
+            };
+
+            // 清除路线
+            const clearRoute = () => {
+                if (drivingInstance) drivingInstance.clear();
+                routeInfo.distance = '';
+                routeInfo.duration = '';
+                routeInfo.cost = '';
+                errorMessage.value = '';
+                // 可选：是否清除标记？这里保留标记方便重新规划
+            };
+
+            onMounted(() => {
+                initMap();
+            });
+
+            return {
+                mapInitialized,
+                isLoading,
+                errorMessage,
+                startPoint,
+                endPoint,
+                routeInfo,
+                selectedPolicy,
+                policies,
+                clickStep,
+                isReadyToPlan,
+                geocodeAndPlan,
+                useCurrentLocation,
+                calculateRoute,
+                clearRoute
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
